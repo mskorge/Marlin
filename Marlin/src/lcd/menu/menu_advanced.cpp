@@ -31,6 +31,7 @@
 #include "menu_item.h"
 #include "../../MarlinCore.h"
 #include "../../module/planner.h"
+#include "../../module/stepper.h"
 
 #if DISABLED(NO_VOLUMETRICS)
   #include "../../gcode/parser.h"
@@ -79,8 +80,6 @@ void menu_backlash();
 #endif
 
 #if HAS_MOTOR_CURRENT_PWM
-
-  #include "../../module/stepper.h"
 
   void menu_pwm() {
     START_MENU();
@@ -296,10 +295,9 @@ void menu_backlash();
     // Autotemp, Min, Max, Fact
     //
     #if BOTH(AUTOTEMP, HAS_TEMP_HOTEND)
-      EDIT_ITEM(bool, MSG_AUTOTEMP, &planner.autotemp_enabled);
-      EDIT_ITEM(int3, MSG_MIN, &planner.autotemp_min, 0, thermalManager.hotend_max_target(0));
-      EDIT_ITEM(int3, MSG_MAX, &planner.autotemp_max, 0, thermalManager.hotend_max_target(0));
-      EDIT_ITEM(float42_52, MSG_FACTOR, &planner.autotemp_factor, 0, 10);
+      EDIT_ITEM(int3, MSG_MIN, &planner.autotemp.min, 0, thermalManager.hotend_max_target(0));
+      EDIT_ITEM(int3, MSG_MAX, &planner.autotemp.max, 0, thermalManager.hotend_max_target(0));
+      EDIT_ITEM(float42_52, MSG_FACTOR, &planner.autotemp.factor, 0, 10);
     #endif
 
     //
@@ -538,6 +536,43 @@ void menu_backlash();
     END_MENU();
   }
 
+  #if ENABLED(SHAPING_MENU)
+
+    void menu_advanced_input_shaping() {
+      constexpr float min_frequency = TERN(__AVR__, float(STEPPER_TIMER_RATE) / 2 / 0x10000, 1.0f);
+
+      START_MENU();
+      BACK_ITEM(MSG_ADVANCED_SETTINGS);
+
+      // M593 F Frequency and D Damping ratio
+      #if ENABLED(INPUT_SHAPING_X)
+        editable.decimal = stepper.get_shaping_frequency(X_AXIS);
+        if (editable.decimal) {
+          ACTION_ITEM_N(X_AXIS, MSG_SHAPING_DISABLE, []{ stepper.set_shaping_frequency(X_AXIS, 0.0f); });
+          EDIT_ITEM_FAST_N(float61, X_AXIS, MSG_SHAPING_FREQ, &editable.decimal, min_frequency, 200.0f, []{ stepper.set_shaping_frequency(X_AXIS, editable.decimal); });
+          editable.decimal = stepper.get_shaping_damping_ratio(X_AXIS);
+          EDIT_ITEM_FAST_N(float42_52, X_AXIS, MSG_SHAPING_ZETA, &editable.decimal, 0.0f, 1.0f, []{ stepper.set_shaping_damping_ratio(X_AXIS, editable.decimal); });
+        }
+        else
+          ACTION_ITEM_N(X_AXIS, MSG_SHAPING_ENABLE, []{ stepper.set_shaping_frequency(X_AXIS, SHAPING_FREQ_X); });
+      #endif
+      #if ENABLED(INPUT_SHAPING_Y)
+        editable.decimal = stepper.get_shaping_frequency(Y_AXIS);
+        if (editable.decimal) {
+          ACTION_ITEM_N(Y_AXIS, MSG_SHAPING_DISABLE, []{ stepper.set_shaping_frequency(Y_AXIS, 0.0f); });
+          EDIT_ITEM_FAST_N(float61, Y_AXIS, MSG_SHAPING_FREQ, &editable.decimal, min_frequency, 200.0f, []{ stepper.set_shaping_frequency(Y_AXIS, editable.decimal); });
+          editable.decimal = stepper.get_shaping_damping_ratio(Y_AXIS);
+          EDIT_ITEM_FAST_N(float42_52, Y_AXIS, MSG_SHAPING_ZETA, &editable.decimal, 0.0f, 1.0f, []{ stepper.set_shaping_damping_ratio(Y_AXIS, editable.decimal); });
+        }
+        else
+          ACTION_ITEM_N(Y_AXIS, MSG_SHAPING_ENABLE, []{ stepper.set_shaping_frequency(Y_AXIS, SHAPING_FREQ_Y); });
+      #endif
+
+      END_MENU();
+    }
+
+  #endif
+
   #if HAS_CLASSIC_JERK
 
     void menu_advanced_jerk() {
@@ -604,11 +639,11 @@ void menu_advanced_steps_per_mm() {
   BACK_ITEM(MSG_ADVANCED_SETTINGS);
 
   LOOP_NUM_AXES(a)
-    EDIT_ITEM_FAST_N(float61, a, MSG_N_STEPS, &planner.settings.axis_steps_per_mm[a], 5, 9999, []{ planner.refresh_positioning(); });
+    EDIT_ITEM_FAST_N(float72, a, MSG_N_STEPS, &planner.settings.axis_steps_per_mm[a], 5, 9999, []{ planner.refresh_positioning(); });
 
   #if ENABLED(DISTINCT_E_FACTORS)
     LOOP_L_N(n, E_STEPPERS)
-      EDIT_ITEM_FAST_N(float61, n, MSG_EN_STEPS, &planner.settings.axis_steps_per_mm[E_AXIS_N(n)], 5, 9999, []{
+      EDIT_ITEM_FAST_N(float72, n, MSG_EN_STEPS, &planner.settings.axis_steps_per_mm[E_AXIS_N(n)], 5, 9999, []{
         const uint8_t e = MenuItemBase::itemIndex;
         if (e == active_extruder)
           planner.refresh_positioning();
@@ -616,7 +651,7 @@ void menu_advanced_steps_per_mm() {
           planner.mm_per_step[E_AXIS_N(e)] = 1.0f / planner.settings.axis_steps_per_mm[E_AXIS_N(e)];
       });
   #elif E_STEPPERS
-    EDIT_ITEM_FAST_N(float61, E_AXIS, MSG_N_STEPS, &planner.settings.axis_steps_per_mm[E_AXIS], 5, 9999, []{ planner.refresh_positioning(); });
+    EDIT_ITEM_FAST_N(float72, E_AXIS, MSG_N_STEPS, &planner.settings.axis_steps_per_mm[E_AXIS], 5, 9999, []{ planner.refresh_positioning(); });
   #endif
 
   END_MENU();
@@ -656,6 +691,11 @@ void menu_advanced_settings() {
 
     // M201 - Acceleration items
     SUBMENU(MSG_ACCELERATION, menu_advanced_acceleration);
+
+    // M593 - Acceleration items
+    #if ENABLED(SHAPING_MENU)
+      if (!is_busy) SUBMENU(MSG_INPUT_SHAPING, menu_advanced_input_shaping);
+    #endif
 
     #if HAS_CLASSIC_JERK
       // M205 - Max Jerk

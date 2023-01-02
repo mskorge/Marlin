@@ -246,6 +246,14 @@ typedef struct SettingsDataStruct {
   float planner_z_fade_height;                          // M420 Zn  planner.z_fade_height
 
   //
+  // AUTOTEMP
+  //
+  #if ENABLED(AUTOTEMP)
+    celsius_t planner_autotemp_max, planner_autotemp_min;
+    float planner_autotemp_factor;
+  #endif
+
+  //
   // MESH_BED_LEVELING
   //
   float mbl_z_offset;                                   // bedlevel.z_offset
@@ -472,7 +480,9 @@ typedef struct SettingsDataStruct {
   //
   // SKEW_CORRECTION
   //
-  skew_factor_t planner_skew_factor;                    // M852 I J K
+  #if ENABLED(SKEW_CORRECTION)
+    skew_factor_t planner_skew_factor;                  // M852 I J K
+  #endif
 
   //
   // ADVANCED_PAUSE_FEATURE
@@ -577,6 +587,18 @@ typedef struct SettingsDataStruct {
     MPC_t mpc_constants[HOTENDS];                       // M306
   #endif
 
+  //
+  // Input Shaping
+  //
+  #if ENABLED(INPUT_SHAPING_X)
+    float shaping_x_frequency, // M593 X F
+          shaping_x_zeta;      // M593 X D
+  #endif
+  #if ENABLED(INPUT_SHAPING_Y)
+    float shaping_y_frequency, // M593 Y F
+          shaping_y_zeta;      // M593 Y D
+  #endif
+
 } SettingsData;
 
 //static_assert(sizeof(SettingsData) <= MARLIN_EEPROM_SIZE, "EEPROM too small to contain SettingsData!");
@@ -646,7 +668,7 @@ void MarlinSettings::postprocess() {
 
   #if LCD_BACKLIGHT_TIMEOUT_MINS
     ui.refresh_backlight_timeout();
-  #elif HAS_DISPLAY_SLEEP && DISABLED(TFT_COLOR_UI)
+  #elif HAS_DISPLAY_SLEEP
     ui.refresh_screen_timeout();
   #endif
 }
@@ -842,6 +864,16 @@ void MarlinSettings::postprocess() {
       const float zfh = TERN(ENABLE_LEVELING_FADE_HEIGHT, planner.z_fade_height, (DEFAULT_LEVELING_FADE_HEIGHT));
       EEPROM_WRITE(zfh);
     }
+
+    //
+    // AUTOTEMP
+    //
+    #if ENABLED(AUTOTEMP)
+      _FIELD_TEST(planner_autotemp_max);
+      EEPROM_WRITE(planner.autotemp.max);
+      EEPROM_WRITE(planner.autotemp.min);
+      EEPROM_WRITE(planner.autotemp.factor);
+    #endif
 
     //
     // Mesh Bed Leveling
@@ -1083,7 +1115,7 @@ void MarlinSettings::postprocess() {
     {
       _FIELD_TEST(bedPID);
       #if ENABLED(PIDTEMPBED)
-        const PID_t &pid = thermalManager.temp_bed.pid;
+        const auto &pid = thermalManager.temp_bed.pid;
         const raw_pid_t bed_pid = { pid.p(), pid.i(), pid.d() };
       #else
         const raw_pid_t bed_pid = { NAN, NAN, NAN };
@@ -1097,7 +1129,7 @@ void MarlinSettings::postprocess() {
     {
       _FIELD_TEST(chamberPID);
       #if ENABLED(PIDTEMPCHAMBER)
-        const PID_t &pid = thermalManager.temp_chamber.pid;
+        const auto &pid = thermalManager.temp_chamber.pid;
         const raw_pid_t chamber_pid = { pid.p(), pid.i(), pid.d() };
       #else
         const raw_pid_t chamber_pid = { NAN, NAN, NAN };
@@ -1409,7 +1441,7 @@ void MarlinSettings::postprocess() {
         EEPROM_WRITE(planner.extruder_advance_K);
       #else
         dummyf = 0;
-        for (uint8_t q = _MAX(EXTRUDERS, 1); q--;) EEPROM_WRITE(dummyf);
+        for (uint8_t q = DISTINCT_E; q--;) EEPROM_WRITE(dummyf);
       #endif
     }
 
@@ -1441,8 +1473,10 @@ void MarlinSettings::postprocess() {
     //
     // Skew correction factors
     //
-    _FIELD_TEST(planner_skew_factor);
-    EEPROM_WRITE(planner.skew_factor);
+    #if ENABLED(SKEW_CORRECTION)
+      _FIELD_TEST(planner_skew_factor);
+      EEPROM_WRITE(planner.skew_factor);
+    #endif
 
     //
     // Advanced Pause filament load & unload lengths
@@ -1600,6 +1634,20 @@ void MarlinSettings::postprocess() {
     #if ENABLED(MPCTEMP)
       HOTEND_LOOP()
         EEPROM_WRITE(thermalManager.temp_hotend[e].constants);
+    #endif
+
+    //
+    // Input Shaping
+    ///
+    #if HAS_SHAPING
+      #if ENABLED(INPUT_SHAPING_X)
+        EEPROM_WRITE(stepper.get_shaping_frequency(X_AXIS));
+        EEPROM_WRITE(stepper.get_shaping_damping_ratio(X_AXIS));
+      #endif
+      #if ENABLED(INPUT_SHAPING_Y)
+        EEPROM_WRITE(stepper.get_shaping_frequency(Y_AXIS));
+        EEPROM_WRITE(stepper.get_shaping_damping_ratio(Y_AXIS));
+      #endif
     #endif
 
     //
@@ -1776,6 +1824,15 @@ void MarlinSettings::postprocess() {
       // Global Leveling
       //
       EEPROM_READ(TERN(ENABLE_LEVELING_FADE_HEIGHT, new_z_fade_height, dummyf));
+
+      //
+      // AUTOTEMP
+      //
+      #if ENABLED(AUTOTEMP)
+        EEPROM_READ(planner.autotemp.max);
+        EEPROM_READ(planner.autotemp.min);
+        EEPROM_READ(planner.autotemp.factor);
+      #endif
 
       //
       // Mesh (Manual) Bed Leveling
@@ -2397,6 +2454,7 @@ void MarlinSettings::postprocess() {
       //
       // Skew correction factors
       //
+      #if ENABLED(SKEW_CORRECTION)
       {
         skew_factor_t skew_factor;
         _FIELD_TEST(planner_skew_factor);
@@ -2411,6 +2469,7 @@ void MarlinSettings::postprocess() {
           }
         #endif
       }
+      #endif
 
       //
       // Advanced Pause filament load & unload lengths
@@ -2570,6 +2629,27 @@ void MarlinSettings::postprocess() {
       {
         HOTEND_LOOP()
           EEPROM_READ(thermalManager.temp_hotend[e].constants);
+      }
+      #endif
+
+      //
+      // Input Shaping
+      //
+      #if ENABLED(INPUT_SHAPING_X)
+      {
+        float _data[2];
+        EEPROM_READ(_data);
+        stepper.set_shaping_frequency(X_AXIS, _data[0]);
+        stepper.set_shaping_damping_ratio(X_AXIS, _data[1]);
+      }
+      #endif
+
+      #if ENABLED(INPUT_SHAPING_Y)
+      {
+        float _data[2];
+        EEPROM_READ(_data);
+        stepper.set_shaping_frequency(Y_AXIS, _data[0]);
+        stepper.set_shaping_damping_ratio(Y_AXIS, _data[1]);
       }
       #endif
 
@@ -2953,6 +3033,15 @@ void MarlinSettings::reset() {
   TERN_(HAS_LEVELING, reset_bed_level());
 
   //
+  // AUTOTEMP
+  //
+  #if ENABLED(AUTOTEMP)
+    planner.autotemp.max = AUTOTEMP_MAX;
+    planner.autotemp.min = AUTOTEMP_MIN;
+    planner.autotemp.factor = AUTOTEMP_FACTOR;
+  #endif
+
+  //
   // X Axis Twist Compensation
   //
   TERN_(X_AXIS_TWIST_COMPENSATION, xatc.reset());
@@ -2997,11 +3086,7 @@ void MarlinSettings::reset() {
   //
 
   #if IS_KINEMATIC
-    segments_per_second = (
-      TERN_(DELTA, DELTA_SEGMENTS_PER_SECOND)
-      TERN_(IS_SCARA, SCARA_SEGMENTS_PER_SECOND)
-      TERN_(POLARGRAPH, POLAR_SEGMENTS_PER_SECOND)
-    );
+    segments_per_second = DEFAULT_SEGMENTS_PER_SECOND;
     #if ENABLED(DELTA)
       const abc_float_t adj = DELTA_ENDSTOP_ADJ, dta = DELTA_TOWER_ANGLE_TRIM, ddr = DELTA_DIAGONAL_ROD_TRIM_TOWER;
       delta_height = DELTA_HEIGHT;
@@ -3228,7 +3313,7 @@ void MarlinSettings::reset() {
     #if ENABLED(DISTINCT_E_FACTORS)
       constexpr float linAdvanceK[] = ADVANCE_K;
       EXTRUDER_LOOP() {
-        const float a = linAdvanceK[_MAX(e, COUNT(linAdvanceK) - 1)];
+        const float a = linAdvanceK[_MAX(uint8_t(e), COUNT(linAdvanceK) - 1)];
         planner.extruder_advance_K[e] = a;
         TERN_(ADVANCE_K_EXTRA, other_extruder_advance_K[e] = a);
       }
@@ -3341,6 +3426,20 @@ void MarlinSettings::reset() {
       #endif
       constants.filament_heat_capacity_permm = _filament_heat_capacity_permm[e];
     }
+  #endif
+
+  //
+  // Input Shaping
+  //
+  #if HAS_SHAPING
+    #if ENABLED(INPUT_SHAPING_X)
+      stepper.set_shaping_frequency(X_AXIS, SHAPING_FREQ_X);
+      stepper.set_shaping_damping_ratio(X_AXIS, SHAPING_ZETA_X);
+    #endif
+    #if ENABLED(INPUT_SHAPING_Y)
+      stepper.set_shaping_frequency(Y_AXIS, SHAPING_FREQ_Y);
+      stepper.set_shaping_damping_ratio(Y_AXIS, SHAPING_ZETA_Y);
+    #endif
   #endif
 
   postprocess();
@@ -3589,6 +3688,11 @@ void MarlinSettings::reset() {
     // TMC stepping mode
     //
     TERN_(HAS_STEALTHCHOP, gcode.M569_report(forReplay));
+
+    //
+    // Input Shaping
+    //
+    TERN_(HAS_SHAPING, gcode.M593_report(forReplay));
 
     //
     // Linear Advance
