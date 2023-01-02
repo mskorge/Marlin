@@ -156,14 +156,6 @@ typedef struct {
 
 } block_flags_t;
 
-#if ENABLED(AUTOTEMP)
-  typedef struct {
-    celsius_t min, max;
-    float factor;
-    bool enabled;
-  } autotemp_t;
-#endif
-
 #if ENABLED(LASER_FEATURE)
 
   typedef struct {
@@ -334,21 +326,25 @@ typedef struct {
   };
 #endif
 
-#if ENABLED(SKEW_CORRECTION)
-  typedef struct {
-    #if ENABLED(SKEW_CORRECTION_GCODE)
-      float xy;
-      #if ENABLED(SKEW_CORRECTION_FOR_Z)
-        float xz, yz;
-      #else
-        const float xz = XZ_SKEW_FACTOR, yz = YZ_SKEW_FACTOR;
-      #endif
-    #else
-      const float xy = XY_SKEW_FACTOR,
-                  xz = XZ_SKEW_FACTOR, yz = YZ_SKEW_FACTOR;
-    #endif
-  } skew_factor_t;
+#if DISABLED(SKEW_CORRECTION)
+  #define XY_SKEW_FACTOR 0
+  #define XZ_SKEW_FACTOR 0
+  #define YZ_SKEW_FACTOR 0
 #endif
+
+typedef struct {
+  #if ENABLED(SKEW_CORRECTION_GCODE)
+    float xy;
+    #if ENABLED(SKEW_CORRECTION_FOR_Z)
+      float xz, yz;
+    #else
+      const float xz = XZ_SKEW_FACTOR, yz = YZ_SKEW_FACTOR;
+    #endif
+  #else
+    const float xy = XY_SKEW_FACTOR,
+                xz = XZ_SKEW_FACTOR, yz = YZ_SKEW_FACTOR;
+  #endif
+} skew_factor_t;
 
 #if ENABLED(DISABLE_INACTIVE_EXTRUDER)
   typedef IF<(BLOCK_BUFFER_SIZE > 64), uint16_t, uint8_t>::type last_move_t;
@@ -480,9 +476,7 @@ class Planner {
       static xyze_pos_t position_cart;
     #endif
 
-    #if ENABLED(SKEW_CORRECTION)
-      static skew_factor_t skew_factor;
-    #endif
+    static skew_factor_t skew_factor;
 
     #if ENABLED(SD_ABORT_ON_ENDSTOP_HIT)
       static bool abort_on_endstop_hit;
@@ -936,7 +930,11 @@ class Planner {
     static float triggered_position_mm(const AxisEnum axis);
 
     // Blocks are queued, or we're running out moves, or the closed loop controller is waiting
-    static bool busy();
+    static bool busy() {
+      return (has_blocks_queued() || cleaning_buffer_counter
+          || TERN0(EXTERNAL_CLOSED_LOOP_CONTROLLER, CLOSED_LOOP_WAITING())
+      );
+    }
 
     // Block until all buffered steps are executed / cleaned
     static void synchronize();
@@ -978,7 +976,9 @@ class Planner {
     #endif
 
     #if ENABLED(AUTOTEMP)
-      static autotemp_t autotemp;
+      static celsius_t autotemp_min, autotemp_max;
+      static float autotemp_factor;
+      static bool autotemp_enabled;
       static void autotemp_update();
       static void autotemp_M104_M109();
       static void autotemp_task();
@@ -988,7 +988,7 @@ class Planner {
       FORCE_INLINE static void recalculate_max_e_jerk() {
         const float prop = junction_deviation_mm * SQRT(0.5) / (1.0f - SQRT(0.5));
         EXTRUDER_LOOP()
-          max_e_jerk[E_INDEX_N(e)] = SQRT(prop * settings.max_acceleration_mm_per_s2[E_AXIS_N(e)]);
+          max_e_jerk[E_INDEX_N(e)] = SQRT(prop * settings.max_acceleration_mm_per_s2[E_INDEX_N(e)]);
       }
     #endif
 
